@@ -6,7 +6,7 @@ MSSV: 2A202603387
 
 ## 1. Case được chọn
 
-- **H2:** kiểm tra tiền đề sai về GitHub Actions đang outage vì incident id=  t89g2q1800fr.
+- **H2:** kiểm tra khẳng định GitHub Actions đang gặp sự cố dựa trên incident `t89g2q1800fr`.
 - Câu hỏi yêu cầu kiểm tra cả snapshot, tình trạng incident và dẫn nguồn.
 - Điểm lần đầu: **50/100**. Raw judge score là 95 nhưng kiểm tra bằng code giới hạn còn 50 vì thiếu get_status.
 
@@ -42,7 +42,7 @@ Trace H2 trong eval_before.json chỉ có một tool call. Đoạn dưới tríc
 
 `grade.mechanical.violations` ghi: `Chưa gọi tool cần thiết: get_status`.
 
-Nguyên nhân có thể xảy ra: prompt trước cải tiến yêu cầu phân biệt incident hiện tại và lịch sử nhưng chưa nêu rõ phải lấy cả status snapshot và chi tiết incident khi kiểm tra khẳng định outage. Model dừng sau khi thấy resolved. Loop chấp nhận câu trả lời có URL mà chưa kiểm tra độ đầy đủ của bằng chứng.
+Prompt cũ chưa yêu cầu rõ phải kiểm tra cả status và chi tiết incident. Vì vậy, model thấy incident đã resolved thì dừng. Câu trả lời có URL nên vượt qua bước kiểm tra nguồn, dù vẫn thiếu dữ liệu status.
 
 ## 3. Thay đổi đã thực hiện
 
@@ -50,9 +50,16 @@ Nguyên nhân có thể xảy ra: prompt trước cải tiến yêu cầu phân 
 
 > Khi hỏi dịch vụ có đang outage hay không, phải lấy cả status snapshot và chi tiết incident được nhắc tới; incident đã resolved không tự chứng minh component hiện operational.
 
-Chọn thay đổi này vì lỗi H2 nằm ở việc chọn bằng chứng và quyết định dừng. Agent vẫn tự chọn tham số theo câu hỏi, không hard-code đáp án hoặc ID incident trong loop.
+Thay đổi này nhằm tránh việc agent kết luận quá sớm như ở H2. Agent vẫn chọn tool và tham số dựa trên câu hỏi, không có đáp án hoặc ID incident viết sẵn trong code.
 
-Prompt còn bổ sung hướng dẫn dùng tên component tiếng Anh ngắn, kiểm tra lại bộ lọc rỗng, đọc incident liên kết ở lượt sau, tránh đọc lặp, phân biệt updated_at với thời điểm bắt đầu/kết thúc và không suy rộng từ danh sách bị giới hạn. Vì có nhiều bổ sung trong cùng phiên bản, chưa thể quy toàn bộ mức tăng điểm cho riêng quy tắc H2.
+Các hướng dẫn khác được thêm vào prompt gồm:
+
+- Dùng tên component tiếng Anh ngắn và thử lại bộ lọc nếu không có kết quả.
+- Đọc thêm incident liên quan khi thấy liên kết trong update, tránh đọc lặp.
+- Không nhầm updated_at với thời điểm bắt đầu hoặc kết thúc sự cố.
+- Không coi danh sách trả về là toàn bộ lịch sử incident.
+
+Do sửa nhiều hướng dẫn cùng lúc, chưa biết riêng thay đổi nào giúp tăng bao nhiêu điểm.
 
 Cơ chế kiểm tra nguồn hiện có: lưu URL từ get_incident_details thành công; nếu câu trả lời không chứa URL nào đã quan sát thì ghi validation_missing_source và yêu cầu sửa trong max_steps. Cơ chế này đã có ở cả hai file agent, không phải thay đổi mới giữa hai phiên bản.
 
@@ -60,7 +67,7 @@ Kiểm tra offline: `python -m unittest discover -s tests -v` — **37/37 tests 
 
 ## 4. So sánh hai lần chạy
 
-Hai file có cùng config: provider và judge provider là openai; agent model và judge model là gpt-4.1-mini; max_steps = 8; dataset core. Cả hai chấm đủ 22 case, không có case unscored. Config không lưu hash snapshot/code nên chưa xác minh độc lập được phiên bản snapshot và mã nguồn tại thời điểm chạy chỉ từ hai file kết quả.
+Hai lần chạy đều dùng OpenAI, model gpt-4.1-mini cho cả agent và phần chấm điểm, max_steps = 8 và bộ case core. Cả hai đều chấm đủ 22 case. File kết quả không lưu mã phiên bản code hoặc snapshot, nên không thể chỉ nhìn config để kiểm tra toàn bộ điều kiện chạy.
 
 | **Chỉ số** | **`eval_before.json`** | **`eval_after.json`** |
 |---|---:|---:|
@@ -75,13 +82,13 @@ Số model calls trong bảng là của agent trên toàn bộ 22 case. Tổng t
 - Sau cải tiến: agent 60.759 token (53.621 prompt + 7.138 completion), judge 36.795 token.
 - Riêng H2: model calls tăng từ 2 lên 3; số tool calls tăng từ 1 lên 2.
 
-Model calls của agent được tính từ số phần tử result.usage; token agent được cộng từ result.usage, token judge từ grade.judge_usage. Không tính tool call thành model call; không suy ra chi phí tiền chỉ từ tổng token.
+Số lượt gọi model và token được cộng từ result.usage; token chấm điểm lấy từ grade.judge_usage. Một lượt model có thể gọi nhiều tools. File chỉ lưu token, chưa có số tiền API đã tính.
 
-### Lỗi đã giải quyết trong lần chạy được lưu
+### Kết quả sau cải tiến
 
 H2 tăng 50 điểm. Trace sau cải tiến có cả get_status(provider='github', component='actions') và get_incident_details ở step 1; toàn bộ run dùng 3 model calls. Snapshot cho biết Actions operational, incident t89g2q1800fr resolved; mechanical không còn violation.
 
-Điểm tổng tăng **5,54 điểm**: 7 case tăng, 13 case giữ nguyên, 2 case giảm. E1 tăng 85 → 100, E5 tăng 93 → 94, A5 tăng 90 → 100, H2 tăng 50 → 100, H3 tăng 98 → 100, H4 tăng 80 → 100 và H6 tăng 60 → 100. Đây là quan sát giữa hai file kết quả hiện tại, chưa chứng minh mọi thay đổi đều do prompt.
+Điểm tổng tăng **5,54 điểm**: 7 case tăng, 13 case giữ nguyên, 2 case giảm. E1 tăng 85 → 100, E5 tăng 93 → 94, A5 tăng 90 → 100, H2 tăng 50 → 100, H3 tăng 98 → 100, H4 tăng 80 → 100 và H6 tăng 60 → 100. Model có thể trả lời khác giữa các lần chạy nên mức tăng này chưa chắc chỉ do sửa prompt.
 
 H6 đã đọc tiếp incident liên kết: step 1 gọi get_status và đọc h02n9572mx9y; step 2 đọc xr3myzj7ms51; step 3 trả lời. Có thể dùng trace này để demo điều tra nhiều bước.
 
@@ -96,7 +103,7 @@ H6 đã đọc tiếp incident liên kết: step 1 gọi get_status và đọc h
 ## 5. Giới hạn
 
 - Điểm LLM judge là ước lượng, có thể sai hoặc tự mâu thuẫn. H2 lần đầu có raw judge score 95 nhưng thiếu tool bắt buộc; cần đọc cả mechanical, answer và trace.
-- Agent và judge cùng dùng gpt-4.1-mini, có nguy cơ thiên lệch khi cùng model tự đánh giá. Điểm cao không chứng minh mọi claim đều đúng.
+- Agent và phần chấm điểm cùng dùng gpt-4.1-mini nên có thể cùng bỏ sót lỗi. Điểm cao chưa có nghĩa mọi kết luận đều đúng.
 - Dữ liệu bài chính là snapshot ngày 09/11/2026. Từ “hiện tại” trong câu trả lời lưu phải hiểu theo thời điểm snapshot, không phải thời điểm đọc báo cáo.
 - Tools chỉ tìm trong 50 incident gần nhất, trả tối đa 5 incident khớp và rút gọn updates. Không tìm thấy không chứng minh không có sự cố; không đủ dữ liệu khẳng định lịch sử đầy đủ hay nguyên nhân lỗi riêng của người dùng.
 - eval_after.json đã được chạy lại và ghi đè. Bảng dùng kết quả mới nhất 96,18, không phải kết quả cũ 94,73. Chưa có bộ kết quả lặp được lưu đầy đủ để đo độ ổn định; thay đổi điểm có thể chịu ảnh hưởng của biến động agent và judge.
@@ -108,7 +115,7 @@ H6 đã đọc tiếp incident liên kết: step 1 gọi get_status và đọc h
 
 ### Cấu hình và điểm
 
-Đã kiểm tra trực tiếp eval_bonus.json sau khi chạy lại toàn bộ 10 case. Cấu hình: provider và judge provider openai, agent model và judge model gpt-4.1-mini, max_steps = 16, dataset bonus.
+Kết quả trong eval_bonus.json là lần chạy đủ 10 case. Cấu hình dùng OpenAI, model gpt-4.1-mini cho cả agent và phần chấm điểm, max_steps = 16, bộ case bonus.
 
 | Chỉ số | Kết quả cuối |
 |---|---:|
@@ -127,13 +134,13 @@ B1, B2, B3, B4, B5, B6, B7, B8, B9 và B10 đều đạt **100/100**, status com
 
 ### Kết nối tools, retry và pagination
 
-Agent dùng tools.schemas và tools.system_prompt khi có, giữ fallback cho bài chính. Bộ bonus hỗ trợ GitHub, Cloudflare, Vercel, npm và DigitalOcean. Prompt yêu cầu nguồn và captured_at riêng từng provider, phân biệt snapshot với incident lịch sử và không bịa provider ngoài schemas.
+Agent lấy danh sách tools và prompt từ tools.schemas và tools.system_prompt nếu có; nếu không thì dùng bộ mặc định của bài chính. Bonus hỗ trợ GitHub, Cloudflare, Vercel, npm và DigitalOcean. Câu trả lời cần có nguồn và thời gian snapshot riêng từng bên, không tự thêm trạng thái của dịch vụ ngoài danh sách hỗ trợ.
 
 Mỗi yêu cầu được nhận diện bằng tên tool và JSON arguments. Sau ba lần thực thi trả RATE_LIMITED cho cùng yêu cầu, loop chặn thực thi tiếp. Với bonus, tool đã hết lượt còn được gỡ khỏi schemas ở các model steps tiếp theo và có lời nhắc dừng. Các provider khác vẫn khả dụng. Đây là giới hạn retry nội bộ của agent, không phải chính sách rate limit của hãng.
 
-Khi chạy live, agent đọc retry_after dạng số giây hoặc HTTP date, fallback retry_after_seconds, lưu thời điểm được phép gọi lại bằng monotonic clock. Gọi sớm nhận RETRY_DEFERRED; có thể báo kết quả từng phần thay vì chờ lâu. Không coi 429 hoặc timeout là outage hay operational. INVALID_ARGUMENTS được trả lại model để sửa tham số trong max_steps.
+Khi gọi API thật, agent đọc thời gian chờ từ retry_after hoặc retry_after_seconds. Nếu gọi lại quá sớm thì trả RETRY_DEFERRED. Agent có thể báo phần đã kiểm tra được thay vì chờ lâu. Lỗi 429 hoặc timeout chỉ cho biết chưa lấy được dữ liệu, không cho biết dịch vụ đang hoạt động hay gặp sự cố. Với INVALID_ARGUMENTS, model nhận lỗi để sửa tham số và thử lại trong số bước còn lại.
 
-Timeline được đọc bằng next_offset, offset integer không âm và limit integer 1–3. Prompt hướng dẫn đọc tiếp khi cần bằng chứng ở trang sau; không tuyên bố đã xem toàn bộ nếu chưa đọc hết. Dữ liệu nhiễu vẫn được giữ trong observation, model được yêu cầu bỏ qua mục không liên quan trong đáp án; chưa tự động nén context.
+Timeline được chia thành nhiều trang. Agent dùng next_offset để đọc trang tiếp theo, với offset là số nguyên không âm và limit từ 1 đến 3. Nếu chưa đọc hết thì phải nói rõ. Các mục nhiễu vẫn được gửi cho model, nhưng không nên đưa vào câu trả lời. Code chưa có bước tự rút gọn dữ liệu này.
 
 ### Lỗi đã phân tích và cải tiến
 
@@ -141,7 +148,7 @@ Timeline được đọc bằng next_offset, offset integer không âm và limit
 - **B10:** lần đầu dừng sau 429, bị 50 điểm. Theo dõi yêu cầu retriable chưa hết giới hạn/cooldown và nhắc model retry trước final. Sau đó đạt 89 nhưng final chỉ viết phần bổ sung Vercel; tiếp tục yêu cầu viết lại toàn bộ báo cáo, giữ status/source/captured_at từng bên, nêu số lần retry thực tế và không bịa chính sách hãng. Lần cuối đạt 100.
 - **B4:** một lần chạy có raw judge score 100 nhưng mechanical giới hạn 50 vì model yêu cầu Vercel lần thứ tư. Dù loop không thực thi API lần đó, trace vẫn ghi tool call và bị tính vượt giới hạn. Sửa bằng cách gỡ tool đã hết lượt khỏi schemas và nhắc dừng sau khi trả đầy đủ observations; không xóa hoặc đổi tên trace để né chấm. Lần cuối đạt 100.
 
-Các kết quả cũ đã bị ghi đè khi chạy lại cùng tên file; số điểm cũ ở trên là lịch sử đã được ghi nhận trong quá trình phân tích. Bảng kết quả cuối lấy từ một file eval_bonus.json đủ 10 case, không ghép case tốt nhất từ nhiều lượt chạy.
+Các lần chạy lại đã ghi đè file kết quả cũ. Điểm cũ nêu trên được ghi lại trong lúc phân tích lỗi; bảng cuối dùng kết quả của một lần chạy đủ 10 case.
 
 ### Kiểm tra offline và giới hạn
 
@@ -152,8 +159,13 @@ python -m unittest discover -s tests -v
 # 37 tests: OK
 ```
 
-Tests bổ sung kiểm tra retry kéo dài, tiếp tục provider khác, cooldown live, đúng tool_call_id khi đọc trang sau, final sớm bị yêu cầu bổ sung bằng chứng, giới hạn bước và gỡ tool đã hết lượt khỏi schemas. Tests dùng scripted provider; không thay thế eval model thật.
+Hai lệnh trên chạy tổng cộng 48 tests và đều pass. Các tests kiểm tra cách trả kết quả tool, đọc trang tiếp theo, xử lý lỗi và dừng retry đúng giới hạn. Tests dùng model giả lập nên không cần API key và không phát sinh phí gọi model.
 
-Kết quả 100/100 chỉ phản ánh lần chạy cuối trên snapshot và tình huống giả lập, không chứng minh ổn định tuyệt đối hoặc mọi live API đều hoạt động. Agent và judge cùng model nên vẫn có thiên lệch. Validation đối chiếu chỉ kiểm tra có đọc chi tiết ít nhất một incident cho mỗi provider liên quan, chưa chứng minh chọn đúng incident trong mọi câu hỏi. Kiểm tra URL vẫn chỉ yêu cầu ít nhất một URL incident đã quan sát. Việc gỡ tool sau hết lượt áp dụng cho cả tên tool trong run, nên cũng dừng các yêu cầu khác cùng tool; nếu model/provider vẫn trả tool call ngoài schemas thì loop giữ trace trung thực và chặn thực thi theo giới hạn hiện có.
+Một số giới hạn còn lại:
 
-Các lần cải tiến cuối tập trung bonus. Số liệu bài chính ở mục 4 vẫn lấy từ eval_after.json hiện có, không suy ra điểm bài chính mới từ kết quả bonus.
+- Bonus đạt 100 ở lần chạy cuối, nhưng chưa chắc các lần sau đều đạt như vậy.
+- Eval dùng dữ liệu snapshot và lỗi giả lập; chưa kiểm tra đầy đủ với API thật.
+- Agent và model chấm điểm đều là gpt-4.1-mini nên điểm chấm có thể thiên lệch.
+- Code có kiểm tra việc đọc chi tiết và dẫn URL, nhưng chưa bảo đảm mọi kết luận đều đủ bằng chứng.
+- Khi một tool hết lượt retry, agent gỡ cả tool đó trong phần còn lại của run. Vì vậy, các yêu cầu khác dùng cùng tool cũng không được tiếp tục.
+
